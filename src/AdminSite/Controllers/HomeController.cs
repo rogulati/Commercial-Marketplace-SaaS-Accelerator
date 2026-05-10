@@ -481,7 +481,14 @@ public class HomeController : BaseController
                 this.unsubscribeStatusHandlers.Process(subscriptionId);
             }
 
-            this.notificationStatusHandlers.Process(subscriptionId);
+            try
+            {
+                this.notificationStatusHandlers.Process(subscriptionId);
+            }
+            catch (Exception notificationEx)
+            {
+                this.logger.LogError($"Notification failed but operation succeeded. Message:{notificationEx.Message} :: {notificationEx.InnerException}");
+            }
 
             return this.RedirectToAction(nameof(this.ActivatedMessage));
         }

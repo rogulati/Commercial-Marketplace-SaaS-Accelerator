@@ -240,11 +240,15 @@ else
             $.ajax({
                 url: '/Home/SubscriptionOperation',
                 type: 'POST',
-                headers: { RequestVerificationToken: csrftoken },
+                headers: { RequestVerificationToken: csrftoken, 'X-Requested-With': 'XMLHttpRequest' },
                 data: formobject + "&subscriptionId=" + subscriptionId + "&planId=" + planId + "&operation=" + operation,
                 cache: false,
                 success: function (result) {
-                    $('#divIndex').html(result);
+                    if (result && result.redirectUrl) {
+                        window.location.href = result.redirectUrl;
+                    } else {
+                        $('#divIndex').html(result);
+                    }
                 },
                 Error:
                     function (result) {

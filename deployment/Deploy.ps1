@@ -42,13 +42,18 @@ Do you agree? (Y/N)
 # Display the message in yellow
 Write-Host $message -ForegroundColor Yellow
 
-# Prompt the user for input
-$response = Read-Host
+if($Quiet) {
+    Write-Host "Quiet mode - auto-accepting agreement."
+}
+else {
+    # Prompt the user for input
+    $response = Read-Host
 
-# Check the user's response
-if ($response -ne 'Y' -and $response -ne 'y') {
-    Write-Host "You did not agree. Exiting..." -ForegroundColor Red
-    exit
+    # Check the user's response
+    if ($response -ne 'Y' -and $response -ne 'y') {
+        Write-Host "You did not agree. Exiting..." -ForegroundColor Red
+        exit
+    }
 }
 
 # Proceed if the user agrees
@@ -66,7 +71,7 @@ $currentSubscription = $currentContext.id
 
 #Get TenantID if not set as argument
 if(!($TenantID)) {    
-    Get-AzTenant | Format-Table
+    az account list --query "[].{TenantId:tenantId, Name:name, SubscriptionId:id}" -o table
     if (!($TenantID = Read-Host "⌨  Type your TenantID or press Enter to accept your current one [$currentTenant]")) { $TenantID = $currentTenant }    
 }
 else {
@@ -75,7 +80,7 @@ else {
 
 #Get Azure Subscription if not set as argument
 if(!($AzureSubscriptionID)) {    
-    Get-AzSubscription -TenantId $TenantID | Format-Table
+    az account list -o table
     if (!($AzureSubscriptionID = Read-Host "⌨  Type your SubscriptionID or press Enter to accept your current one [$currentSubscription]")) { $AzureSubscriptionID = $currentSubscription }
 }
 else {
@@ -92,35 +97,6 @@ Write-Host "🔑 Azure Subscription '$AzureSubscriptionID' selected."
 
 $ErrorActionPreference = "Stop"
 $startTime = Get-Date
-#region Select Tenant / Subscription for deployment
-
-$currentContext = az account show | ConvertFrom-Json
-$currentTenant = $currentContext.tenantId
-$currentSubscription = $currentContext.id
-
-#Get TenantID if not set as argument
-if(!($TenantID)) {    
-    Get-AzTenant | Format-Table
-    if (!($TenantID = Read-Host "⌨  Type your TenantID or press Enter to accept your current one [$currentTenant]")) { $TenantID = $currentTenant }    
-}
-else {
-    Write-Host "🔑 Tenant provided: $TenantID"
-}
-
-#Get Azure Subscription if not set as argument
-if(!($AzureSubscriptionID)) {    
-    Get-AzSubscription -TenantId $TenantID | Format-Table
-    if (!($AzureSubscriptionID = Read-Host "⌨  Type your SubscriptionID or press Enter to accept your current one [$currentSubscription]")) { $AzureSubscriptionID = $currentSubscription }
-}
-else {
-    Write-Host "🔑 Azure Subscription provided: $AzureSubscriptionID"
-}
-
-#Set the AZ Cli context
-az account set -s $AzureSubscriptionID
-Write-Host "🔑 Azure Subscription '$AzureSubscriptionID' selected."
-
-#endregion
 
 
 
@@ -152,7 +128,7 @@ if($KeyVault -eq "")
    {
 	#region Check If KeyVault Exists
 		$KeyVaultApiUri="https://management.azure.com/subscriptions/$AzureSubscriptionID/providers/Microsoft.KeyVault/checkNameAvailability?api-version=2019-09-01"
-		$KeyVaultApiBody='{"name": "'+$KeyVault+'","type": "Microsoft.KeyVault/vaults"}'
+		$KeyVaultApiBody='{\"name\": \"'+$KeyVault+'\",\"type\": \"Microsoft.KeyVault/vaults\"}'
 
 		$kv_check=az rest --method post --uri $KeyVaultApiUri --headers 'Content-Type=application/json' --body $KeyVaultApiBody | ConvertFrom-Json
 
@@ -211,7 +187,7 @@ Write-Host "Starting SaaS Accelerator Deployment..."
 
 
 #region Check If SQL Server Exist
-$sql_exists = Get-AzureRmSqlServer -ServerName $SQLServerName -ResourceGroupName $ResourceGroupForDeployment -ErrorAction SilentlyContinue
+$sql_exists = az sql server show --name $SQLServerName --resource-group $ResourceGroupForDeployment 2>$null
 if ($sql_exists) 
 {
 	Write-Host ""
@@ -481,34 +457,15 @@ $WebAppNameService=$WebAppNamePrefix+"-asp"
 $WebAppNameAdmin=$WebAppNamePrefix+"-admin"
 $WebAppNamePortal=$WebAppNamePrefix+"-portal"
 $VnetName=$WebAppNamePrefix+"-vnet"
-$privateSqlEndpointName=$WebAppNamePrefix+"-db-pe"
-$privateKvEndpointName=$WebAppNamePrefix+"-kv-pe"
-$privateSqlDnsZoneName="privatelink.database.windows.net"
-$privateKvDnsZoneName="privatelink.vaultcore.windows.net"
-$privateSqlLink =$WebAppNamePrefix+"-db-link"
-$privateKvlink =$WebAppNamePrefix+"-kv-link"
-$WebSubnetName="web"
-$SqlSubnetName="sql"
-$KvSubnetName="kv"
-$DefaultSubnetName="default"
-
 #keep the space at the end of the string - bug in az cli running on windows powershell truncates last char https://github.com/Azure/azure-cli/issues/10066
 $ADApplicationSecretKeyVault="@Microsoft.KeyVault(VaultName=$KeyVault;SecretName=ADApplicationSecret) "
 $DefaultConnectionKeyVault="@Microsoft.KeyVault(VaultName=$KeyVault;SecretName=DefaultConnection) "
 $ServerUri = $SQLServerName+".database.windows.net"
-$ServerUriPrivate = $SQLServerName+".privatelink.database.windows.net"
-$Connection="Server=tcp:"+$ServerUriPrivate+";Database="+$SQLDatabaseName+";TrustServerCertificate=True;Authentication=Active Directory Managed Identity;"
+$Connection="Server=tcp:"+$ServerUri+";Database="+$SQLDatabaseName+";TrustServerCertificate=True;Authentication=Active Directory Managed Identity;"
 
 Write-host "   🔵 Resource Group"
 Write-host "      ➡️ Create Resource Group"
 az group create --location $Location --name $ResourceGroupForDeployment --output $azCliOutput
-
-Write-host "      ➡️ Create VNET and Subnet"
-az network vnet create --resource-group $ResourceGroupForDeployment --name $VnetName --address-prefixes "10.0.0.0/20" --output $azCliOutput
-az network vnet subnet create --resource-group $ResourceGroupForDeployment --vnet-name $VnetName -n $DefaultSubnetName --address-prefixes "10.0.0.0/24" --output $azCliOutput
-az network vnet subnet create --resource-group $ResourceGroupForDeployment --vnet-name $VnetName -n $WebSubnetName --address-prefixes "10.0.1.0/24" --service-endpoints Microsoft.Sql Microsoft.KeyVault --delegations Microsoft.Web/serverfarms  --output $azCliOutput 
-az network vnet subnet create --resource-group $ResourceGroupForDeployment --vnet-name $VnetName -n $SqlSubnetName --address-prefixes "10.0.2.0/24"  --output $azCliOutput 
-az network vnet subnet create --resource-group $ResourceGroupForDeployment --vnet-name $VnetName -n $KvSubnetName --address-prefixes "10.0.3.0/24"   --output $azCliOutput 
 
 Write-host "      ➡️ Create Sql Server"
 $userId = az ad signed-in-user show --query id -o tsv 
@@ -525,7 +482,7 @@ if ($env:ACC_CLOUD -eq $null){
 }
 
 Write-host "      ➡️ Create SQL DB"
-az sql db create --resource-group $ResourceGroupForDeployment --server $SQLServerName --name $SQLDatabaseName  --edition Standard  --capacity 10 --zone-redundant false --output $azCliOutput
+az sql db create --resource-group $ResourceGroupForDeployment --server $SQLServerName --name $SQLDatabaseName  --edition Basic  --capacity 5 --zone-redundant false --output $azCliOutput
 
 Write-host "   🔵 KeyVault"
 Write-host "      ➡️ Create KeyVault"
@@ -533,13 +490,12 @@ az keyvault create --name $KeyVault --resource-group $ResourceGroupForDeployment
 Write-host "      ➡️ Add Secrets"
 az keyvault secret set --vault-name $KeyVault --name ADApplicationSecret --value="$ADApplicationSecret" --output $azCliOutput
 az keyvault secret set --vault-name $KeyVault --name DefaultConnection --value $Connection --output $azCliOutput
-Write-host "      ➡️ Update Firewall"
-az keyvault update --name $KeyVault --resource-group $ResourceGroupForDeployment --default-action Deny --output $azCliOutput
-az keyvault network-rule add --name $KeyVault --resource-group $ResourceGroupForDeployment --vnet-name $VnetName --subnet $WebSubnetName --output $azCliOutput
+Write-host "      ➡️ KeyVault network set to Allow (no VNet in Free tier)"
+az keyvault update --name $KeyVault --resource-group $ResourceGroupForDeployment --default-action Allow --output $azCliOutput
 
 Write-host "   🔵 App Service Plan"
 Write-host "      ➡️ Create App Service Plan"
-az appservice plan create -g $ResourceGroupForDeployment -n $WebAppNameService --sku B1 --output $azCliOutput
+az appservice plan create -g $ResourceGroupForDeployment -n $WebAppNameService --sku F1 --output $azCliOutput
 
 Write-host "   🔵 Admin Portal WebApp"
 Write-host "      ➡️ Create Web App"
@@ -551,7 +507,6 @@ az keyvault set-policy --name $KeyVault  --object-id $WebAppNameAdminId --secret
 Write-host "      ➡️ Set Configuration"
 az webapp config connection-string set -g $ResourceGroupForDeployment -n $WebAppNameAdmin -t SQLAzure --output $azCliOutput --settings DefaultConnection=$DefaultConnectionKeyVault 
 az webapp config appsettings set -g $ResourceGroupForDeployment  -n $WebAppNameAdmin --output $azCliOutput --settings KnownUsers=$PublisherAdminUsers SaaSApiConfiguration__AdAuthenticationEndPoint=https://login.microsoftonline.com SaaSApiConfiguration__ClientId=$ADApplicationID SaaSApiConfiguration__ClientSecret=$ADApplicationSecretKeyVault SaaSApiConfiguration__FulFillmentAPIBaseURL=https://marketplaceapi.microsoft.com/api SaaSApiConfiguration__FulFillmentAPIVersion=2018-08-31 SaaSApiConfiguration__GrantType=client_credentials SaaSApiConfiguration__MTClientId=$ADApplicationIDAdmin SaaSApiConfiguration__IsAdminPortalMultiTenant=$IsAdminPortalMultiTenant SaaSApiConfiguration__Resource=20e940b3-4c77-4b0b-9a53-9e16a1b010a7 SaaSApiConfiguration__TenantId=$TenantID SaaSApiConfiguration__SignedOutRedirectUri=https://$WebAppNamePrefix-admin.azurewebsites.net/Home/Index/ SaaSApiConfiguration_CodeHash=$SaaSApiConfiguration_CodeHash
-az webapp config set -g $ResourceGroupForDeployment -n $WebAppNameAdmin --always-on true  --output $azCliOutput
 
 Write-host "   🔵 Customer Portal WebApp"
 Write-host "      ➡️ Create Web App"
@@ -563,7 +518,6 @@ az keyvault set-policy --name $KeyVault  --object-id $WebAppNamePortalId --secre
 Write-host "      ➡️ Set Configuration"
 az webapp config connection-string set -g $ResourceGroupForDeployment -n $WebAppNamePortal -t SQLAzure --output $azCliOutput --settings DefaultConnection=$DefaultConnectionKeyVault
 az webapp config appsettings set -g $ResourceGroupForDeployment  -n $WebAppNamePortal --output $azCliOutput --settings SaaSApiConfiguration__AdAuthenticationEndPoint=https://login.microsoftonline.com SaaSApiConfiguration__ClientId=$ADApplicationID SaaSApiConfiguration__ClientSecret=$ADApplicationSecretKeyVault SaaSApiConfiguration__FulFillmentAPIBaseURL=https://marketplaceapi.microsoft.com/api SaaSApiConfiguration__FulFillmentAPIVersion=2018-08-31 SaaSApiConfiguration__GrantType=client_credentials SaaSApiConfiguration__MTClientId=$ADMTApplicationIDPortal SaaSApiConfiguration__Resource=20e940b3-4c77-4b0b-9a53-9e16a1b010a7 SaaSApiConfiguration__TenantId=$TenantID SaaSApiConfiguration__SignedOutRedirectUri=https://$WebAppNamePrefix-portal.azurewebsites.net/Home/Index/ SaaSApiConfiguration_CodeHash=$SaaSApiConfiguration_CodeHash
-az webapp config set -g $ResourceGroupForDeployment -n $WebAppNamePortal --always-on true --output $azCliOutput
 
 #endregion
 
@@ -588,10 +542,8 @@ az webapp deploy --resource-group $ResourceGroupForDeployment --name $WebAppName
 Write-host "   🔵 Deploy Code to Customer Portal"
 az webapp deploy --resource-group $ResourceGroupForDeployment --name $WebAppNamePortal --src-path "../Publish/CustomerSite.zip" --type zip --output $azCliOutput
 
-Write-host "   🔵 Update Firewall for WebApps and SQL"
-az webapp vnet-integration add --resource-group $ResourceGroupForDeployment --name $WebAppNamePortal --vnet $VnetName --subnet $WebSubnetName --output $azCliOutput
-az webapp vnet-integration add --resource-group $ResourceGroupForDeployment --name $WebAppNameAdmin --vnet $VnetName --subnet $WebSubnetName --output $azCliOutput
-az sql server vnet-rule create --name $WebAppNamePrefix-vnet --resource-group $ResourceGroupForDeployment --server $SQLServerName --vnet-name $VnetName --subnet $WebSubnetName --output $azCliOutput
+Write-host "   \ud83d\udd35 SQL Firewall - Allow Azure Services"
+az sql server firewall-rule create --resource-group $ResourceGroupForDeployment --server $SQLServerName -n AllowAzureIP --start-ip-address "0.0.0.0" --end-ip-address "0.0.0.0" --output $azCliOutput 2>$null
 
 Write-host "   🔵 Clean up"
 Remove-Item -Path ../src/AdminSite/appsettings.Development.json
@@ -600,40 +552,7 @@ Remove-Item -Path script.sql
 
 #endregion
 
-#region Create SQL Private Endpoints
-# Get SQL Server
-$sqlServerId=az sql server show --name $SQLServerName --resource-group $ResourceGroupForDeployment --query id -o tsv
-
-# Create a private endpoint
-az network private-endpoint create --name $privateSqlEndpointName --resource-group $ResourceGroupForDeployment --vnet-name $vnetName --subnet $SqlSubnetName --private-connection-resource-id $sqlServerId --group-ids sqlServer --connection-name sqlConnection
-
-
-# Create a SQL private DNS zone
-az network private-dns zone create --name $privateSqlDnsZoneName --resource-group $ResourceGroupForDeployment
-
-# Link the SQL private DNS zone to the VNet
-az network private-dns link vnet create --name $privateSqlLink --resource-group $ResourceGroupForDeployment --virtual-network $vnetName --zone-name $privateSqlDnsZoneName --registration-enabled false
-
-az network private-endpoint dns-zone-group create --resource-group $ResourceGroupForDeployment --endpoint-name $privateSqlEndpointName --name "sql-zone-group"   --private-dns-zone $privateSqlDnsZoneName   --zone-name "sqlserver"
-#endregion
-
-
-#region Create KV Private Endpoints
-# Get KV Server
-$keyVaultId=az keyvault show --name $KeyVault --resource-group $ResourceGroupForDeployment --query id -o tsv
-
-# Create a KV private endpoint
-az network private-endpoint create --name $privateKvEndpointName --resource-group $ResourceGroupForDeployment --vnet-name $vnetName --subnet $KvSubnetName --private-connection-resource-id $keyVaultId --group-ids vault  --connection-name kvConnection
-
-
-# Create a KV private DNS zone
-az network private-dns zone create --name $privateKvDnsZoneName --resource-group $ResourceGroupForDeployment
-
-# Link the KV private DNS zone to the VNet
-az network private-dns link vnet create --name $privateKvLink --resource-group $ResourceGroupForDeployment --virtual-network $vnetName --zone-name $privateKvDnsZoneName --registration-enabled false
-
-az network private-endpoint dns-zone-group create --resource-group $ResourceGroupForDeployment --endpoint-name $privateKvEndpointName --name "Kv-zone-group"   --private-dns-zone $privateKvDnsZoneName   --zone-name "Kv-zone"
-#endregion
+#endregion (no private endpoints in Free tier - using public endpoints with firewall rules)
 
 
 

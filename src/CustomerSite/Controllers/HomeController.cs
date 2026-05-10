@@ -651,6 +651,20 @@ public class HomeController : BaseController
 
                 this.notificationStatusHandlers.Process(subscriptionId);
 
+                // Check for external redirect URL after Subscribe
+                if (operation == "Activate")
+                {
+                    var postSubscribeRedirectUrl = this.applicationConfigRepository.GetValueByName("PostSubscribeRedirectUrl");
+                    if (!string.IsNullOrWhiteSpace(postSubscribeRedirectUrl))
+                    {
+                        if (Request.Headers["X-Requested-With"] == "XMLHttpRequest")
+                        {
+                            return Json(new { redirectUrl = postSubscribeRedirectUrl });
+                        }
+                        return this.Redirect(postSubscribeRedirectUrl);
+                    }
+                }
+
                 return this.RedirectToAction(nameof(this.ProcessMessage), new { action = operation, status = operation });
             }
             catch (Exception ex)
